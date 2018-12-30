@@ -26,6 +26,8 @@ struct ads {
 #define LIKELY(x) __builtin_expect(!!(x),1)
 #define UNLIKELY(x) __builtin_expect(!!(x),0)
 #define sg_align(d, a)     (((d) + (a - 1)) & ~(a - 1))
+extern void __qsort_r (void *b, size_t n, size_t s, __compar_d_fn_t cmp, void *arg);
+#define QSORT(void *b, size_t n, size_t s, __compar_d_fn_t cmp) __qsort_r(b,n,s,cmp,0)
 
 inline int my_memcmp(const void *ads1, const void *ads2) {
 	ads* a1 = *(ads**) ads1;
@@ -2772,8 +2774,10 @@ int main(int argc, char** argv) {
 
 	struct timeval tv5, tv6;
 	gettimeofday(&tv5, 0);
-	qsort(data, lines.size(), sizeof(char*), cmp4);
+	//qsort(data, lines.size(), sizeof(char*), cmp4);
 	//sort(data,data+lines.size(),cmpads);
+	//QSORT(data, lines.size(), sizeof(char*), cmp4);
+	__qsort_r(data,lines.size(),sizeof(char*),(__compar_d_fn_t)cmp4,0);
 	gettimeofday(&tv6, 0);
 
 	fprintf(stderr, "sort interval3=%d\n",
