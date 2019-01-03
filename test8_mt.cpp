@@ -16,6 +16,8 @@
 #include<algorithm>
 #include <time.h>
 #include <math.h>
+#include <algorithm>
+
 using namespace std;
 
 
@@ -521,52 +523,111 @@ void test() {
 
 }
 
-struct thread_args{
-	char* pre;
-	char* data;
-	vector<char*>* output;
-	int thr;
-	int len;
+
+struct kfifo {
+    char **buffer;    /* the buffer holding the data */
+    unsigned int size;    /* the size of the allocated buffer */
+    unsigned int in;    /* data is added at offset (in % size) */
+    unsigned int out;    /* data is extracted from off. (out % size) */
 };
 
+struct kfifo *kfifo_alloc(unsigned int size)
+{
+    char **buffer;
+    struct kfifo *ret;
 
-void* handle(void* arg){
-	  //vector<char*> lines;
-        //lines.reserve(10000000 * 2);
-        thread_args* ta=(thread_args*)arg;
-	char* addr=ta->data;
-	char* end=addr+ta->len;
-	if(ta->thr!=0){
-		while(addr-1>=ta->pre&&*(addr-1)!='\n'&&*(addr-1)!=0)addr--;
-		//addr++;
-	}
-        char* start, *pre;
-        start = addr;
-        pre = addr;
-        while ((start = strchr(start, '\n')) != 0&&start<end) {
-                int len = start - pre + 1;
-                pre[len - 1] = 0;
-		//fprintf(stderr,"pre=%s,thr=%d\n",pre,ta->thr);
-                ta->output->push_back(pre);
-                pre = start + 1;
-                start++;
-        }
+    /*   
+ *        * round up to the next power of 2, since our 'let the indices   
+ *             * wrap' tachnique works only in this case.   
+ *                  */
 
-	char** data = ta->output->data();
+    buffer =(char**)malloc(size*sizeof(char*));
+    if (!buffer)
+        return 0;
 
-        struct timeval tv5, tv6;
-        gettimeofday(&tv5, 0);
-        qsort(data, ta->output->size(), sizeof(char*), cmp4);
-        //sort(data,data+lines.size(),cmpads);
-        //QSORT(data, lines.size(), sizeof(char*), cmp4);
-        //mysort(data,lines.size(),sizeof(char*),(__compar_d_fn_t)cmp4,0);
-        gettimeofday(&tv6, 0);
+    ret =(kfifo*) malloc(sizeof(kfifo));
+    ret->buffer=buffer;
+    ret->size=size;
+    ret->in=0;
+    ret->out=0;
 
-        fprintf(stderr, "thread %d,lines num=%d,len=%d,sort interval3=%d\n",ta->thr,ta->output->size(),ta->len,
-                        (tv6.tv_sec - tv5.tv_sec) * 1000
-                                      + (tv6.tv_usec - tv5.tv_usec) / 1000);
-	return 0;
+
+    return ret;
 }
+
+
+unsigned int __kfifo_put(struct kfifo *fifo,
+             char *buffer)
+{
+    unsigned int l;
+
+    //len = min(len, fifo->size - fifo->in + fifo->out); 
+    if(fifo->size - fifo->in + fifo->out<=0)
+        return -1;//full    
+
+    /*   
+ *        * Ensure that we sample the fifo->out index -before- we   
+ *             * start putting bytes into the kfifo.   
+ *                  */
+
+    //smp_mb();
+    __sync_synchronize();
+
+    /* first put the data starting from fifo->in to buffer end */
+    //l = min(len, fifo->size - (fifo->in & (fifo->size - 1)));     
+    //memcpy(fifo->buffer + (fifo->in & (fifo->size - 1)), buffer, l);     
+
+    /* then put the rest (if any) at the beginning of the buffer */
+    //memcpy(fifo->buffer, buffer + l, len - l);    
+    fifo->buffer[fifo->in%fifo->size]=buffer;
+
+    /*   
+ *        * Ensure that we add the bytes to the kfifo -before-   
+ *             * we update the fifo->in index.   
+ *                  */
+
+    //smp_wmb();
+    __sync_synchronize();
+
+    fifo->in +=1;
+
+    return 0;
+}
+
+
+
+unsigned int __kfifo_get(struct kfifo *fifo, char* &buffer)
+{
+    unsigned int l;
+
+    //len = min(len, fifo->in - fifo->out);     
+    if(fifo->in<=fifo->out)
+        return -1;//empty
+
+
+    //smp_rmb();
+    __sync_synchronize();
+
+    /* first get the data from fifo->out until the end of the buffer */
+    //l = min(len, fifo->size - (fifo->out & (fifo->size - 1)));     
+    //memcpy(buffer, fifo->buffer + (fifo->out & (fifo->size - 1)), l);     
+
+    /* then get the rest (if any) from the beginning of the buffer */
+    //memcpy(buffer + l, fifo->buffer, len - l);     
+    buffer=fifo->buffer[fifo->out%fifo->size];
+    /*   
+ *        * Ensure that we remove the bytes from the kfifo -before-   
+ *             * we update the fifo->out index.   
+ *                  */
+
+    __sync_synchronize();
+
+    fifo->out += 1;
+
+    return 0;
+}
+
+
 
 class merge_sort{
 	public:
@@ -599,6 +660,42 @@ class merge_sort{
 				adjust(q);
 			}
 		}
+
+
+		void sort(kfifo* input[],vector<char*>&output,int (*compar)(const void *, const void *)){
+                        cmp=(__compar_d_fn_t)compar;
+                        k=5;
+                        ls.reserve(k);
+                        b.reserve(k+1);
+
+                        for(int i=0;i<k;++i){
+				char* tmp=0;
+				while(1){
+                                	if(__kfifo_get(input[i],tmp)==0){
+                                        	b.push_back(tmp);
+						break;
+                                	}
+				}
+                                     
+
+                        }
+
+                        create_loser_tree();
+
+                        while(b[ls[0]]){
+                                int q=ls[0];
+                                output.push_back(b[q]);
+                                char* tmp=0;
+				while(1){
+                                        if(__kfifo_get(input[q],tmp)==0){
+                                                b.push_back(tmp);
+                                                break;
+                                        }
+                                }
+                       		b[q]=tmp;
+                                adjust(q);
+                        }
+                }
 	
 	private:
 		int k;
@@ -633,6 +730,106 @@ class merge_sort{
 			}
 		}
 };
+
+void max_heapify(char* arr[], int start, int end,int (*compar)(const void *, const void *)) {
+    int dad = start;
+    int son = dad * 2 + 1;
+    while (son <= end) {
+        if (son + 1 <= end && compar(&arr[son] ,&arr[son + 1])<0) 
+            son++;
+        if (arr[dad] > arr[son]) 
+            return;
+        else { 
+            swap(arr[dad], arr[son]);
+            dad = son;
+            son = dad * 2 + 1;
+        }
+    }
+}
+
+void heap_sort(char* arr[], int len,int (*compar)(const void *, const void *),void* arg) {
+    kfifo* fifo=(kfifo*)arg;
+    for (int i = len / 2 - 1; i >= 0; i--)
+        max_heapify(arr, i, len - 1,compar);
+    for (int i = len - 1; i > 0; i--) {
+        swap(arr[0], arr[i]);
+        __kfifo_put(fifo,arr[0]);
+        max_heapify(arr, 0, i - 1,compar);
+    }
+    __kfifo_put(fifo,0);
+}
+
+struct thread_args{
+	char* pre;
+	char* data;
+	vector<char*>* output;
+	int thr;
+	int len;
+	kfifo* fifo;
+};
+
+
+void* sort_handle(void* arg){
+          //vector<char*> lines;
+        //lines.reserve(10000000 * 2);
+        thread_args* ta=(thread_args*)arg;
+        char* addr=ta->data;
+        char* end=addr+ta->len;
+        if(ta->thr!=0){
+                while(addr-1>=ta->pre&&*(addr-1)!='\n'&&*(addr-1)!=0)addr--;
+                //addr++;
+        }
+        char* start, *pre;
+        start = addr;
+        pre = addr;
+        while ((start = strchr(start, '\n')) != 0&&start<end) {
+                int len = start - pre + 1;
+                pre[len - 1] = 0;
+                //fprintf(stderr,"pre=%s,thr=%d\n",pre,ta->thr);
+                ta->output->push_back(pre);
+                pre = start + 1;
+                start++;
+        }
+
+        char** data = ta->output->data();
+
+        struct timeval tv5, tv6;
+        gettimeofday(&tv5, 0);
+        //qsort(data, ta->output->size(), sizeof(char*), cmp4);
+        //sort(data,data+lines.size(),cmpads);
+        //QSORT(data, lines.size(), sizeof(char*), cmp4);
+        //mysort(data,lines.size(),sizeof(char*),(__compar_d_fn_t)cmp4,0);
+        heap_sort(data,ta->output->size(),cmp4,ta->fifo);
+        gettimeofday(&tv6, 0);
+
+        fprintf(stderr, "thread %d,lines num=%d,len=%d,sort interval3=%d\n",ta->thr,ta->output->size(),ta->len,
+                        (tv6.tv_sec - tv5.tv_sec) * 1000
+                                      + (tv6.tv_usec - tv5.tv_usec) / 1000);
+        return 0;
+}
+
+
+struct merge_thread_args{
+	kfifo** fifo;
+	vector<char*>* sort_lines;
+};
+
+void* merge_handle(void* arg){
+	fprintf(stderr,"in merge thread\n");
+	struct timeval tv1, tv2;
+	gettimeofday(&tv1, 0);
+        merge_sort ms;
+	merge_thread_args* ta=(merge_thread_args*)arg;
+        ms.sort(ta->fifo,*(ta->sort_lines),cmp4);
+	gettimeofday(&tv2, 0);
+	fprintf(stderr, "merge thread,sort interval3=%d\n",
+                        (tv2.tv_sec - tv1.tv_sec) * 1000
+                                      + (tv2.tv_usec - tv1.tv_usec) / 1000);
+        return 0;
+}
+
+
+
 
 int main(int argc, char** argv) {
 	struct timeval t1, t2;
@@ -675,7 +872,7 @@ int main(int argc, char** argv) {
 	}
 #endif
 
-	const int thread_num=6;
+	const int thread_num=5;
 	
 	char* addr = (char*) malloc(length);
 	int i=0;
@@ -685,9 +882,13 @@ int main(int argc, char** argv) {
 	vector<pthread_t> tids;
 	tids.reserve(thread_num);
 	output_lines.reserve(thread_num);
+	kfifo* fifo[thread_num];
+
+
 	for(int i=0;i<thread_num;++i){
 		vector<char*> tmp;
 		output_lines.push_back(tmp);
+		fifo[i]=kfifo_alloc(1000*1000);	
 	}
 	int beg=0;
 	while(i<thread_num){
@@ -708,81 +909,25 @@ int main(int argc, char** argv) {
 		args[i].data=addr+beg;
 		args[i].output=&output_lines[i];
 		args[i].thr=i;
+		args[i].fifo=fifo[i];
 		beg+=block;
-		pthread_create(&tid,0,handle,&args[i]);
+		pthread_create(&tid,0,sort_handle,&args[i]);
 		tids.push_back(tid);
 		++i;
 	}
+
+	pthread_t tid;
+	merge_thread_args mta;
+	vector<char*> sort_lines;
+	mta.fifo=fifo;
+	mta.sort_lines=&sort_lines;
+	pthread_create(&tid,0,merge_handle,fifo);
 
 
 	for(int i=0;i<tids.size();++i){
 		pthread_join(tids[i],0);
 	}
-#if 0
-	//read(ifd, addr, length);
-	struct timeval tv3, tv4;
-	gettimeofday(&tv3, 0);
-	//vector<char*> lines;
-	//lines.reserve(10000000 * 2);
-	char* start, *pre;
-	start = addr;
-	pre = addr;
-	char* end = addr + length;
-	while ((start = strchr(start, '\n')) != 0) {
-		//if(UNLIKELY(*start=='\n')){
-		//ads*  a=new ads;
-		//posix_memalign(&a,sizeof(ads),8);
-		int len = start - pre + 1;
-#if 0
-		if(a->len+1<=7)
-		posix_memalign(&data,4,a->len+1);
-		else if(a->len+1<=15)
-		posix_memalign(&data,8,a->len+1);
-		else
-		posix_memalign(&data,16,a->len+1);
 
-		if(a->len+1>=16)
-		posix_memalign(&data,16,a->len+1);
-		else
-#endif
-#if 0
-		void* data=0;
-		posix_memalign(&data,8,len);
-
-		memcpy(data,pre,len-1);
-		char* tmp=(char*)data;
-		tmp[len-1]='\0';
-#endif
-		pre[len - 1] = 0;
-		lines.push_back(pre);
-		pre = start + 1;
-		start++;
-		//}
-	}
-	close(ifd);
-	//munmap(addr,length);
-	gettimeofday(&tv4, 0);
-	fprintf(stderr, "read interval2=%d\n",
-			(tv4.tv_sec - tv3.tv_sec) * 1000
-					+ (tv4.tv_usec - tv3.tv_usec) / 1000);
-	char** data = lines.data();
-
-	struct timeval tv5, tv6;
-	gettimeofday(&tv5, 0);
-	qsort(data, lines.size(), sizeof(char*), cmp4);
-	//sort(data,data+lines.size(),cmpads);
-	//QSORT(data, lines.size(), sizeof(char*), cmp4);
-	//mysort(data,lines.size(),sizeof(char*),(__compar_d_fn_t)cmp4,0);
-	gettimeofday(&tv6, 0);
-
-	fprintf(stderr, "sort interval3=%d\n",
-			(tv6.tv_sec - tv5.tv_sec) * 1000
-					+ (tv6.tv_usec - tv5.tv_usec) / 1000);
-#endif
-
-	merge_sort ms;
-	vector<char*> sort_lines;
-	ms.sort(output_lines,sort_lines,cmp4);
 
 	int ofd = open(output.c_str(), O_RDWR | O_CREAT, 00644);
 
