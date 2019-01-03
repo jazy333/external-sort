@@ -675,6 +675,7 @@ class merge_sort{
                                         	b.push_back(tmp);
 						break;
                                 	}
+					fprintf(stderr,"fifo empty\n");
 				}
                                      
 
@@ -688,11 +689,10 @@ class merge_sort{
                                 char* tmp=0;
 				while(1){
                                         if(__kfifo_get(input[q],tmp)==0){
-                                                b.push_back(tmp);
+                                                b[q]=tmp;
                                                 break;
                                         }
                                 }
-                       		b[q]=tmp;
                                 adjust(q);
                         }
                 }
@@ -731,16 +731,22 @@ class merge_sort{
 		}
 };
 
+void swap(char** s1,char** s2){
+	char* tmp=*s1;
+	*s1=*s2;
+	*s2=tmp;
+}
+
 void max_heapify(char* arr[], int start, int end,int (*compar)(const void *, const void *)) {
     int dad = start;
     int son = dad * 2 + 1;
     while (son <= end) {
-        if (son + 1 <= end && compar(&arr[son] ,&arr[son + 1])<0) 
+        if (son + 1 <= end && compar(&arr[son] ,&arr[son + 1])>0) 
             son++;
-        if (arr[dad] > arr[son]) 
+        if (compar(&arr[dad],&arr[son])<0) 
             return;
         else { 
-            swap(arr[dad], arr[son]);
+            swap(&arr[dad], &arr[son]);
             dad = son;
             son = dad * 2 + 1;
         }
@@ -752,11 +758,12 @@ void heap_sort(char* arr[], int len,int (*compar)(const void *, const void *),vo
     for (int i = len / 2 - 1; i >= 0; i--)
         max_heapify(arr, i, len - 1,compar);
     for (int i = len - 1; i > 0; i--) {
-        swap(arr[0], arr[i]);
-        __kfifo_put(fifo,arr[0]);
+	while(__kfifo_put(fifo,arr[0])!=0);
+        swap(&arr[0], &arr[i]);
         max_heapify(arr, 0, i - 1,compar);
     }
-    __kfifo_put(fifo,0);
+    while(__kfifo_put(fifo,arr[0])!=0);
+    while(__kfifo_put(fifo,0)!=0);
 }
 
 struct thread_args{
@@ -822,7 +829,7 @@ void* merge_handle(void* arg){
 	merge_thread_args* ta=(merge_thread_args*)arg;
         ms.sort(ta->fifo,*(ta->sort_lines),cmp4);
 	gettimeofday(&tv2, 0);
-	fprintf(stderr, "merge thread,sort interval3=%d\n",
+	fprintf(stderr, "merge thread,output size=%d,sort interval=%d\n",ta->sort_lines->size(),
                         (tv2.tv_sec - tv1.tv_sec) * 1000
                                       + (tv2.tv_usec - tv1.tv_usec) / 1000);
         return 0;
@@ -921,8 +928,8 @@ int main(int argc, char** argv) {
 	vector<char*> sort_lines;
 	mta.fifo=fifo;
 	mta.sort_lines=&sort_lines;
-	pthread_create(&tid,0,merge_handle,fifo);
-
+	pthread_create(&tid,0,merge_handle,&mta);
+	tids.push_back(tid);
 
 	for(int i=0;i<tids.size();++i){
 		pthread_join(tids[i],0);
