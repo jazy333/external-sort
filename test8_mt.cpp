@@ -675,7 +675,7 @@ class merge_sort{
                                         	b.push_back(tmp);
 						break;
                                 	}
-					fprintf(stderr,"fifo empty\n");
+					//fprintf(stderr,"fifo empty\n");
 				}
                                      
 
