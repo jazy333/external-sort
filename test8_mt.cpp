@@ -845,7 +845,7 @@ void* sort_handle(void* arg){
                 ta->output->push_back(pre);
                 pre = start + 1;
                 start++;
-		real_len+=len;
+		ta->real_len+=len;
         }
 
         char** data = ta->output->data();
@@ -879,7 +879,7 @@ void* merge_handle(void* arg){
 	gettimeofday(&tv1, 0);
         merge_sort ms;
 	merge_thread_args* ta=(merge_thread_args*)arg;
-        ms.sort(input,*(ta->sort_lines),cmp4,ta->thr,ta->step);
+        ms.sort(*(ta->input),*(ta->sort_lines),cmp4,ta->thr,ta->step);
 	gettimeofday(&tv2, 0);
 	fprintf(stderr, "merge thread,output size=%d,sort interval=%d\n",ta->sort_lines->size(),
                         (tv2.tv_sec - tv1.tv_sec) * 1000
@@ -975,7 +975,7 @@ int main(int argc, char** argv) {
 
 	i=0;
 	tids.clear();
-	vector<merge_thread_args> mtas
+	vector<merge_thread_args> mtas;
 	vector<vector<char*>> sort_lines;
 
 	int lines_num=0;	
