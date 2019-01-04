@@ -503,6 +503,23 @@ void build_chunk(const vector<char*>& lines,char* addr1){
 		}
 }
 
+
+void build_chunk(const vector<vector<char*>>& lines,char* addr1){
+        	int index = 0;
+                int size = lines.size();
+                for (int i = 0; i < size; ++i) {
+			int size1=lines[i].size();
+			for(int j=0;j<size1;++j){
+				char* line=lines[i][j];	
+                        	int len = strlen(line);
+                        	line[len] = '\n';
+                        	mycpy1(addr1 + index, line, len + 1);
+                        	index += len + 1;
+			}
+                }
+}
+
+
 void test() {
 	char tmp[129] = { 0 };
 	for (int i = 0; i < 129; ++i) {
@@ -662,6 +679,37 @@ class merge_sort{
 		}
 
 
+		void sort(vector<vector<char*>>& input,vector<char*>&output,int (*compar)(const void *, const void *),int thr,int step){
+                        cmp=(__compar_d_fn_t)compar;
+                        k=input.size();
+                        ls.reserve(k);
+                        b.reserve(k+1);
+			index.reserve(k);
+			int start=thr*step;
+                        for(int i=0;i<k;++i){
+                                if(input[i].size()>start){
+                                        b.push_back(input[i][start]);
+                                }else
+                                        b.push_back(0);
+				index.push_back(start);
+
+                        }
+
+                        create_loser_tree();
+
+                        while(b[ls[0]]){
+                                int q=ls[0];
+                                output.push_back(b[q]);
+                                index[q]++;
+                                if(index[q]<input[q].size())
+                                        b[q]=input[q][index[q]];
+                                else
+                                        b[q]=0;
+                                adjust(q);
+                        }
+                }
+
+		
 		void sort(kfifo* input[],vector<char*>&output,int (*compar)(const void *, const void *)){
                         cmp=(__compar_d_fn_t)compar;
                         k=5;
@@ -772,7 +820,7 @@ struct thread_args{
 	vector<char*>* output;
 	int thr;
 	int len;
-	kfifo* fifo;
+	int real_len;
 };
 
 
@@ -797,17 +845,18 @@ void* sort_handle(void* arg){
                 ta->output->push_back(pre);
                 pre = start + 1;
                 start++;
+		real_len+=len;
         }
 
         char** data = ta->output->data();
 
         struct timeval tv5, tv6;
         gettimeofday(&tv5, 0);
-        //qsort(data, ta->output->size(), sizeof(char*), cmp4);
+        qsort(data, ta->output->size(), sizeof(char*), cmp4);
         //sort(data,data+lines.size(),cmpads);
         //QSORT(data, lines.size(), sizeof(char*), cmp4);
         //mysort(data,lines.size(),sizeof(char*),(__compar_d_fn_t)cmp4,0);
-        heap_sort(data,ta->output->size(),cmp5,ta->fifo);
+        //heap_sort(data,ta->output->size(),cmp5,ta->fifo);
         gettimeofday(&tv6, 0);
 
         fprintf(stderr, "thread %d,lines num=%d,len=%d,sort interval3=%d\n",ta->thr,ta->output->size(),ta->len,
@@ -818,8 +867,10 @@ void* sort_handle(void* arg){
 
 
 struct merge_thread_args{
-	kfifo** fifo;
+	int thr;
 	vector<char*>* sort_lines;
+	vector<vector<char*>>* input;
+	int step;
 };
 
 void* merge_handle(void* arg){
@@ -828,7 +879,7 @@ void* merge_handle(void* arg){
 	gettimeofday(&tv1, 0);
         merge_sort ms;
 	merge_thread_args* ta=(merge_thread_args*)arg;
-        ms.sort(ta->fifo,*(ta->sort_lines),cmp4);
+        ms.sort(input,*(ta->sort_lines),cmp4,ta->thr,ta->step);
 	gettimeofday(&tv2, 0);
 	fprintf(stderr, "merge thread,output size=%d,sort interval=%d\n",ta->sort_lines->size(),
                         (tv2.tv_sec - tv1.tv_sec) * 1000
@@ -876,7 +927,7 @@ int main(int argc, char** argv) {
 	}
 #endif
 
-	const int thread_num=5;
+	const int thread_num=6;
 	
 	char* addr = (char*) malloc(length);
 	int i=0;
@@ -892,7 +943,6 @@ int main(int argc, char** argv) {
 	for(int i=0;i<thread_num;++i){
 		vector<char*> tmp;
 		output_lines.push_back(tmp);
-		fifo[i]=kfifo_alloc(200*1000*1000);	
 	}
 	int beg=0;
 	while(i<thread_num){
@@ -912,25 +962,39 @@ int main(int argc, char** argv) {
 		args[i].data=addr+beg;
 		args[i].output=&output_lines[i];
 		args[i].thr=i;
-		args[i].fifo=fifo[i];
 		beg+=block;
 		pthread_create(&tid,0,sort_handle,&args[i]);
 		tids.push_back(tid);
 		++i;
 	}
 
-	pthread_t tid;
-	merge_thread_args mta;
-	vector<char*> sort_lines;
-	mta.fifo=fifo;
-	mta.sort_lines=&sort_lines;
-	pthread_create(&tid,0,merge_handle,&mta);
-	tids.push_back(tid);
-	gettimeofday(&t4, 0);
-	 fprintf(stderr, "read interval4=%d\n",
-                        (t4.tv_sec - t3.tv_sec) * 1000
-                                        + (t4.tv_usec - t3.tv_usec) / 1000);
+	 for(int i=0;i<tids.size();++i){
+                pthread_join(tids[i],0);
+        }
+
+
+	i=0;
+	tids.clear();
+	vector<merge_thread_args> mtas
+	vector<vector<char*>> sort_lines;
+
+	int lines_num=0;	
+        for(int i=0;i<thread_num;++i){
+                vector<char*> tmp;
+                sort_lines.push_back(tmp);
+		lines_num+=output_lines[i].size();
+        }
 	
+	int step=lines_num/(thread_num*thread_num);
+	while(i<thread_num){
+		pthread_t tid;
+		mtas[i].sort_lines=&sort_lines[i];
+		mtas[i].thr=i;
+		mtas[i].input=&output_lines;
+		mtas[i].step=step;
+		pthread_create(&tid,0,merge_handle,&mtas[i]);
+		tids.push_back(tid);
+	}
 	for(int i=0;i<tids.size();++i){
 		pthread_join(tids[i],0);
 	}
@@ -955,24 +1019,9 @@ int main(int argc, char** argv) {
 	struct timeval tv7, tv8;
 	gettimeofday(&tv7, 0);
 	char* addr1 = (char*) malloc(length);
-	build_chunk(sort_lines,addr1);
-#if 0
-	int index = 0;
-	int size = lines.size();
-	int count[128] = { 0 };
-	for (int i = 0; i < size; ++i) {
-		//write(ofd,lines[i]->data,lines[i]->len+1);
-		//lines[i]->data[lines[i]->len-1]='\n';
-		//memcpy(addr1+index,lines[i]->data,lines[i]->len);
-		int len = strlen(lines[i]);
-		count[len]++;
-		lines[i][len] = '\n';
-		//memcpy(addr1+index,lines[i],len+1);
-		mycpy1(addr1 + index, lines[i], len + 1);
+	
 
-		index += len + 1;
-	}
-#endif
+
 	gettimeofday(&tv8, 0);
 	/*
 	for (int i = 0; i < 128; ++i) {
