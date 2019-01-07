@@ -708,6 +708,40 @@ class merge_sort{
                         }
                 }
 
+
+		void sort(vector<vector<char*>>& input,char* output, int& offset,int (*compar)(const void *, const void *),const vector<int>& beg,const vector<int>& end){
+                        cmp=(__compar_d_fn_t)compar;
+                        k=input.size();
+                        ls.reserve(k);
+                        b.reserve(k+1);
+                        index.reserve(k);
+                        for(int i=0;i<k;++i){
+                                if(beg[i]<end[i]){
+                                        b.push_back(input[i][beg[i]]);
+                                }else
+                                        b.push_back(0);
+                                index.push_back(beg[i]);
+
+                        }
+
+                        create_loser_tree();
+
+                        while(b[ls[0]]){
+                                int q=ls[0];
+                                //output.push_back(b[q]);
+                                int len=strlen(b[q]);
+				b[q][len]='\n';
+                                mycpy1(output+offset,b[q],len+1);
+				//fprintf(stderr,output);
+				offset+=len+1;
+                                index[q]++;
+                                if(index[q]<end[q])
+                                        b[q]=input[q][index[q]];
+                                else
+                                        b[q]=0;
+                                adjust(q);
+                        }
+                }
 		
 		void sort(kfifo* input[],vector<char*>&output,int (*compar)(const void *, const void *)){
                         cmp=(__compar_d_fn_t)compar;
@@ -872,6 +906,8 @@ struct merge_thread_args{
 	int step;
 	vector<int> end;
 	vector<int> beg;
+	char* output;
+	int output_len;
 };
 
 void* merge_handle(void* arg){
@@ -880,7 +916,7 @@ void* merge_handle(void* arg){
 	gettimeofday(&tv1, 0);
         merge_sort ms;
 	merge_thread_args* ta=(merge_thread_args*)arg;
-        ms.sort(*(ta->input),*(ta->sort_lines),cmp4,ta->beg,ta->end);
+        ms.sort(*(ta->input),ta->output,ta->output_len,cmp4,ta->beg,ta->end);
 	gettimeofday(&tv2, 0);
 	fprintf(stderr, "merge thread %d,output size=%d,sort interval=%d\n",ta->thr,ta->sort_lines->size(),
                         (tv2.tv_sec - tv1.tv_sec) * 1000
@@ -915,7 +951,8 @@ void end_adjust(const vector<vector<char*>>& output_lines,int i, int step,int th
 			imax=j;
 			smax=output_lines[j][tend-1];
 		}
-	}
+	
+	char* output;}
 
 	//fprintf(stderr,"smax=%s,imax=%d\n",smax,imax);
 	for(int j=0;j<thread_num;++j){
@@ -1045,6 +1082,8 @@ int main(int argc, char** argv) {
 		}*/
 		mtas[i].beg=start;
 		mtas[i].end=end;
+		mtas[i].output=(char*)malloc(200*1024*1024);
+		mtas[i].output_len=0;
 		pthread_create(&tid,0,merge_handle,&mtas[i]);
 		tids.push_back(tid);
 		++i;
@@ -1063,9 +1102,8 @@ int main(int argc, char** argv) {
 
 	struct timeval tv7, tv8;
 	gettimeofday(&tv7, 0);
-	char* addr1 = (char*) malloc(length);
-	build_chunk(sort_lines,addr1);
-
+	//char* addr1 = (char*) malloc(length);
+	//build_chunk(sort_lines,addr1);
 	gettimeofday(&tv8, 0);
 	
 	fprintf(stderr, "memcpy interval4=%d\n",
@@ -1073,7 +1111,10 @@ int main(int argc, char** argv) {
 					+ (tv8.tv_usec - tv7.tv_usec) / 1000);
 	struct timeval tv9, tv10;
 	gettimeofday(&tv9, 0);
-	write(ofd, addr1, length);
+	//write(ofd, addr1, length);
+	for(int i=0;i<thread_num;++i){
+		write(ofd, mtas[i].output, mtas[i].output_len);
+	}
 	gettimeofday(&tv10, 0);
 	fprintf(stderr, "output interval=%d\n",
 			(tv10.tv_sec - tv9.tv_sec) * 1000
