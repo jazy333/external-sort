@@ -696,12 +696,15 @@ class merge_sort{
                         }
 
                         create_loser_tree();
+			int end=step*(thr+1);
 
                         while(b[ls[0]]){
                                 int q=ls[0];
                                 output.push_back(b[q]);
                                 index[q]++;
-                                if(index[q]<input[q].size())
+				if(thr==input.size()-1)
+					end=input[q].size();
+                                if(index[q]<end)
                                         b[q]=input[q][index[q]];
                                 else
                                         b[q]=0;
@@ -881,7 +884,7 @@ void* merge_handle(void* arg){
 	merge_thread_args* ta=(merge_thread_args*)arg;
         ms.sort(*(ta->input),*(ta->sort_lines),cmp4,ta->thr,ta->step);
 	gettimeofday(&tv2, 0);
-	fprintf(stderr, "merge thread,output size=%d,sort interval=%d\n",ta->sort_lines->size(),
+	fprintf(stderr, "merge thread %d,output size=%d,sort interval=%d\n",ta->thr,ta->sort_lines->size(),
                         (tv2.tv_sec - tv1.tv_sec) * 1000
                                       + (tv2.tv_usec - tv1.tv_usec) / 1000);
         return 0;
@@ -973,9 +976,8 @@ int main(int argc, char** argv) {
         }
 
 
-	i=0;
 	tids.clear();
-	vector<merge_thread_args> mtas;
+	merge_thread_args mtas[thread_num];
 	vector<vector<char*>> sort_lines;
 
 	int lines_num=0;	
@@ -986,6 +988,7 @@ int main(int argc, char** argv) {
         }
 	
 	int step=lines_num/(thread_num*thread_num);
+	i=0;
 	while(i<thread_num){
 		pthread_t tid;
 		mtas[i].sort_lines=&sort_lines[i];
@@ -994,6 +997,7 @@ int main(int argc, char** argv) {
 		mtas[i].step=step;
 		pthread_create(&tid,0,merge_handle,&mtas[i]);
 		tids.push_back(tid);
+		++i;
 	}
 	for(int i=0;i<tids.size();++i){
 		pthread_join(tids[i],0);
@@ -1019,14 +1023,14 @@ int main(int argc, char** argv) {
 	struct timeval tv7, tv8;
 	gettimeofday(&tv7, 0);
 	char* addr1 = (char*) malloc(length);
-	
-
+	build_chunk(sort_lines,addr1);
 
 	gettimeofday(&tv8, 0);
 	/*
 	for (int i = 0; i < 128; ++i) {
 		fprintf(stderr, "count%d=%d\n", i + 1, count[i]);
 	}*/
+	
 	fprintf(stderr, "memcpy interval4=%d\n",
 			(tv8.tv_sec - tv7.tv_sec) * 1000
 					+ (tv8.tv_usec - tv7.tv_usec) / 1000);
