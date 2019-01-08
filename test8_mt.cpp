@@ -972,11 +972,11 @@ int main(int argc, char** argv) {
 	}
 
 	//test();
-	string input = string(argv[3]) + string("/") + string(argv[1]);
-	string output = string(argv[3]) + string("/") + string(argv[2]);
+	string input = string(argv[1]);
+	string output = string(argv[2]);
 	int ifd = open(input.c_str(), O_RDONLY);
 	if (ifd < 0) {
-		fprintf(stderr, "open file failed,err=%s\n", strerror(errno));
+		fprintf(stderr, "open file failed,err=%s,input=%s\n", strerror(errno),input.c_str());
 		exit(-1);
 	}
 
