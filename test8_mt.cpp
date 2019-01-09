@@ -854,14 +854,24 @@ struct thread_args{
 	int thr;
 	int len;
 	int real_len;
+	int fd;
+	int offset;
 };
 
 
 void* sort_handle(void* arg){
           //vector<char*> lines;
         //lines.reserve(10000000 * 2);
+        struct timeval tv1, tv2;
+	gettimeofday(&tv1, 0);
         fprintf(stderr,"in sort thread\n");
         thread_args* ta=(thread_args*)arg;
+	int ret=-1;
+	if(ta->thr!=0)
+		 ret=pread(ta->fd, ta->data-129, ta->len+129,ta->offset-129);
+	else
+		ret=pread(ta->fd, ta->data, ta->len,ta->offset);
+	fprintf(stderr,"ret=%d,errstr=%s,ta->len=%d,offset=%d\n",ret,strerror(errno),ta->len,ta->offset);
         char* addr=ta->data;
         char* end=addr+ta->len;
         if(ta->thr!=0){
@@ -880,7 +890,10 @@ void* sort_handle(void* arg){
                 start++;
 		ta->real_len+=len;
         }
-
+	gettimeofday(&tv2, 0);
+	fprintf(stderr, "thread %d,prepaire interval3=%d\n",ta->thr,
+                        (tv2.tv_sec - tv1.tv_sec) * 1000
+                                      + (tv2.tv_usec - tv1.tv_usec) / 1000);
         char** data = ta->output->data();
 
         struct timeval tv5, tv6;
@@ -980,7 +993,7 @@ int main(int argc, char** argv) {
 		exit(-1);
 	}
 
-
+	readahead(ifd,0,1024*1024*1024);
 	struct timeval t3, t4;
 	gettimeofday(&t3, 0);
 	struct stat sb;
@@ -1021,11 +1034,11 @@ int main(int argc, char** argv) {
 	while(i<thread_num){
 		pthread_t tid;
 		if(i==thread_num-1){
-			read(ifd,addr+beg,length-block*(thread_num-1));
+			//read(ifd,addr+beg,length-block*(thread_num-1));
 			args[i].len=length-block*(thread_num-1);
 		}
 		else{
-			read(ifd, addr+beg, block);
+			//read(ifd, addr+beg, block);
 			args[i].len=block;
 		}
 		if(i==0)
@@ -1035,6 +1048,8 @@ int main(int argc, char** argv) {
 		args[i].data=addr+beg;
 		args[i].output=&output_lines[i];
 		args[i].thr=i;
+		args[i].fd=ifd;
+		args[i].offset=block*i;
 		beg+=block;
 		pthread_create(&tid,0,sort_handle,&args[i]);
 		tids.push_back(tid);
