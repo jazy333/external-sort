@@ -21,6 +21,21 @@
 using namespace std;
 
 
+struct ads
+{
+    char* str;
+    int len;
+    int next;
+};
+
+#define RADIX 256
+struct bucket
+{
+    int head;
+    int tail;
+};
+
+
 #define LIKELY(x) __builtin_expect(!!(x),1)
 #define UNLIKELY(x) __builtin_expect(!!(x),0)
 #define sg_align(d, a)     (((d) + (a - 1)) & ~(a - 1))
@@ -56,6 +71,8 @@ int cmp4(const void *p1, const void *p2) {
 //return strcmp(a1->data,a2->data);
 }
 
+
+
 int cmp5(const void *p1, const void *p2) {
         char* a1 = (char*) p1;
         char* a2 = (char*) p2;
@@ -87,7 +104,13 @@ int cmp5(const void *p1, const void *p2) {
 //return strcmp(a1->data,a2->data);
 }
 
+int cmp6(const void *p1, const void *p2) {
+	ads* a1 = (ads*) p1;
+	ads* a2 = (ads*) p2;
 
+	int len=a1->len<a2->len?a1->len:a2->len;
+	return memcmp(a1->str,a2->str,len);
+}
 
  inline void mycpy1(const char* d, const char* s, int len) {
 	int off = len >> 4;
@@ -487,6 +510,72 @@ int cmp5(const void *p1, const void *p2) {
 }
 
 
+void allocation(ads ** arr, int first_index, int i_th,bucket* bucket_queue)
+{
+    for(int i = 0; i < RADIX; ++i)     // 置桶为空
+    {
+        bucket_queue[i].head = -1;
+    }
+    int index = first_index, key_ith;  // key_ith 串第i_th个字符
+    while(index != -1)                 // 分配
+    {
+        key_ith = 0;                   // 默认串的第i_th字符为空
+        if(arr[index]->len > i_th)
+        {
+            key_ith = arr[index]->str[i_th]; // 取第i_th个排序码
+        }
+        if(bucket_queue[key_ith].head == -1)    // 桶为空
+        {
+            bucket_queue[key_ith].head = index;
+        }else
+        {
+            arr[bucket_queue[key_ith].tail]->next = index;  // 更新子链
+        }
+        bucket_queue[key_ith].tail = index;     // 更新子链的末指针
+        index = arr[index]->next;
+    }
+}
+
+
+void collection(ads ** arr, int & first_index,bucket* bucket_queue)
+{
+    int q_index = 0;  // 桶队列下标
+    int last_index;   // 记录已收集子链的末指针
+    while(bucket_queue[q_index].head == -1)
+    {
+        ++q_index;
+    }
+    first_index = bucket_queue[q_index].head;
+    last_index = bucket_queue[q_index].tail;
+ 
+    while(++q_index < RADIX)
+    {
+        while(q_index < RADIX && bucket_queue[q_index].head == -1)
+        {
+            ++q_index;
+        }
+        if(q_index < RADIX && bucket_queue[q_index].head != -1)
+        {
+            arr[last_index]->next = bucket_queue[q_index].head;
+            last_index = bucket_queue[q_index].tail;
+        }
+    }
+    arr[last_index]->next = -1;
+}
+
+
+int radix_sort(ads ** arr, int digits,bucket* bucket_queue)
+{
+    int first_index = 0;
+    for(int i = digits - 1; i >= 0; --i)
+    {
+        allocation(arr, first_index, i,bucket_queue);
+        collection(arr, first_index,bucket_queue);
+    }
+    return first_index;
+}
+
+
 void build_chunk(const vector<char*>& lines,char* addr1){
 	int index = 0;
 		int size = lines.size();
@@ -644,7 +733,10 @@ unsigned int __kfifo_get(struct kfifo *fifo, char* &buffer)
     return 0;
 }
 
+
 char* STR_MAX="{";
+ads ADS_MAX;
+ads ADS_MIN;
 class merge_sort{
 	public:
 		
@@ -727,11 +819,9 @@ class merge_sort{
 
                         while(compar(&b[ls[0]],&STR_MAX)!=0){
                                 int q=ls[0];
-                                //output.push_back(b[q]);
                                 int len=strlen(b[q]);
 				b[q][len]='\n';
                                 mycpy1(output+offset,b[q],len+1);
-				//fprintf(stderr,output);
 				offset+=len+1;
                                 index[q]++;
                                 if(index[q]<end[q])
@@ -741,7 +831,38 @@ class merge_sort{
                                 adjust(q);
                         }
                 }
-		
+	
+
+		  void sort(vector<vector<ads*>>& input,char* output, int& offset,int (*compar)(const void *, const void *),const vector<int>& beg,const vector<int>& end){
+                        cmp=(__compar_d_fn_t)compar;
+                        k=input.size();
+                        ls.reserve(k);
+                        b.reserve(k+1);
+                        index.reserve(k);
+                        for(int i=0;i<k;++i){
+                                if(beg[i]<end[i]){
+                                        b1.push_back(input[i][beg[i]]);
+                                }else
+                                        b1.push_back(&ADS_MAX);
+                                index.push_back(beg[i]);
+
+                        }
+
+                        create_loser_tree1();
+
+                        while(compar(b[ls[0]],&STR_MAX)!=0){
+                                int q=ls[0];
+                                mycpy1(output+offset,b1[q]->str,b1[q]->len+1);
+                                offset+=b1[q]->len+1;
+                                index[q]++;
+                                if(index[q]<end[q])
+                                        b1[q]=input[q][index[q]];
+                                else
+                                        b1[q]=&ADS_MAX;
+                                adjust1(q);
+                        }
+                }
+			
 		void sort(kfifo* input[],vector<char*>&output,int (*compar)(const void *, const void *)){
                         cmp=(__compar_d_fn_t)compar;
                         k=5;
@@ -781,16 +902,13 @@ class merge_sort{
 		int k;
 		vector<int> ls;
 		vector<char*> b;
+		vector<ads*> b1;
 		vector<int> index;
 		__compar_d_fn_t cmp;
 		 inline void adjust(int i){
 			int t=(i+k)/2;
 			while(t>0){
-				//if(ls[t]==k||!b[i]||(i!=k&&b[ls[t]]&&cmp(&b[i],&b[ls[t]],0)>0)){
 				if(cmp(&b[i],&b[ls[t]],0)>0){
-					/*int tmp=i;
-					i=ls[t];
-					ls[t]=tmp;*/
 					i=i^ls[t];
 					ls[t]=i^ls[t];
 					i=i^ls[t];
@@ -801,6 +919,22 @@ class merge_sort{
 			ls[0]=i;
 			
 		}
+
+
+		inline void adjust1(int i){
+                        int t=(i+k)/2;
+                        while(t>0){
+                                if(cmp(b1[i],b1[ls[t]],0)>0){
+                                        i=i^ls[t];
+                                        ls[t]=i^ls[t];
+                                        i=i^ls[t];
+                                }
+                                t=t>>1;
+                        }
+
+                        ls[0]=i;
+
+                }	
 
 	
 
@@ -813,6 +947,16 @@ class merge_sort{
 				adjust(i);
 			}
 		}
+
+		void create_loser_tree1(){
+                        b1.push_back(&ADS_MIN);
+                        for(int i=0;i<k;++i){
+                                ls.push_back(k);
+                        }
+                        for(int i=k-1;i>=0;--i){
+                                adjust1(i);
+                        }
+                }
 };
 
 void swap(char** s1,char** s2){
@@ -853,12 +997,13 @@ void heap_sort(char* arr[], int len,int (*compar)(const void *, const void *),vo
 struct thread_args{
 	char* pre;
 	char* data;
-	vector<char*>* output;
+	vector<ads*>* output;
 	int thr;
 	int len;
 	int real_len;
 	int fd;
 	int offset;
+	bucket bucket_queue[RADIX];
 };
 
 
@@ -884,28 +1029,42 @@ void* sort_handle(void* arg){
         char* start, *pre;
         start = addr;
         pre = addr;
+	char* adss=(char*)malloc(20000000*sizeof(ads));
+	int i=0;
         while ((start = strchr(start, '\n')) != 0&&start<end) {
-                int len = start - pre + 1;
-                pre[len - 1] = 0;
+		ads* a=(ads*)adss;
+                int len = start - pre ;
+		a->len=len;
+		a->str=pre;
+		++i;
+		a->next=i;
+                //pre[len - 1] = 0;
                 //fprintf(stderr,"pre=%s,thr=%d\n",pre,ta->thr);
-                ta->output->push_back(pre);
+                ta->output->push_back(a);
                 pre = start + 1;
                 start++;
+		adss+=sizeof(ads);
 		//ta->real_len+=len;
         }
+
+	ads* a=(ads*)adss;
+	a->next=-1;
+	ta->output->push_back(a);
 	gettimeofday(&tv2, 0);
-	fprintf(stderr, "thread %d,prepare interval3=%d\n",ta->thr,
+	fprintf(stderr, "thread %d,prepare interval3=%d,lines num=%d\n",ta->thr,
                         (tv2.tv_sec - tv1.tv_sec) * 1000
-                                      + (tv2.tv_usec - tv1.tv_usec) / 1000);
-        char** data = ta->output->data();
+                                      + (tv2.tv_usec - tv1.tv_usec) / 1000,ta->output->size());
+        ads** data = ta->output->data();
 
         struct timeval tv5, tv6;
         gettimeofday(&tv5, 0);
-        qsort(data, ta->output->size(), sizeof(char*), cmp4);
+        //qsort(data, ta->output->size(), sizeof(char*), cmp4);
         //sort(data,data+lines.size(),cmpads);
         //QSORT(data, lines.size(), sizeof(char*), cmp4);
         //mysort(data,lines.size(),sizeof(char*),(__compar_d_fn_t)cmp4,0);
         //heap_sort(data,ta->output->size(),cmp5,ta->fifo);
+        radix_sort(data,128,ta->bucket_queue);
+	ta->output->pop_back();
         gettimeofday(&tv6, 0);
 
         fprintf(stderr, "thread %d,lines num=%d,len=%d,sort interval3=%d\n",ta->thr,ta->output->size(),ta->len,
@@ -918,7 +1077,7 @@ void* sort_handle(void* arg){
 struct merge_thread_args{
 	int thr;
 	vector<char*>* sort_lines;
-	vector<vector<char*>>* input;
+	vector<vector<ads*>>* input;
 	int step;
 	vector<int> end;
 	vector<int> beg;
@@ -935,7 +1094,7 @@ void* merge_handle(void* arg){
 	gettimeofday(&tv1, 0);
         merge_sort ms;
 	merge_thread_args* ta=(merge_thread_args*)arg;
-        ms.sort(*(ta->input),ta->output,ta->output_len,cmp4,ta->beg,ta->end);
+        ms.sort(*(ta->input),ta->output,ta->output_len,cmp6,ta->beg,ta->end);
 	(*(ta->offsets))[ta->thr]=ta->output_len;
 	gettimeofday(&tv2, 0);
 	fprintf(stderr, "merge thread %d,output line size=%d,offset=%d,sort interval=%d\n",ta->thr,ta->sort_lines->size(),
@@ -969,6 +1128,24 @@ int bsearch(const char** ptr,int size,char* target,int (*compar)(const void *, c
 	return 0;
 }
 
+
+int bsearch(const ads** ptr,int size,ads* target,int (*compar)(const void *, const void *)){
+        int beg=0;
+        int end=size-1;
+        while(beg<=end){
+                int mid=(beg+end)/2;
+                if(compar(target,ptr[mid])>=0&&(size==mid+1||compar(target,ptr[mid+1])<0)){
+                        return mid+1;
+                }else if(compar(target,ptr[mid])>=0){
+                        beg=mid+1;
+                }
+                else{
+                        end=mid-1;
+                }
+        }
+        return 0;
+}
+
 void end_adjust(const vector<vector<char*>>& output_lines,int i, int step,int thread_num,vector<int>& end,int (*compar)(const void *, const void *)){
 	int tend=(i+1)*step;
 	end=vector<int>(thread_num,tend);
@@ -982,7 +1159,6 @@ void end_adjust(const vector<vector<char*>>& output_lines,int i, int step,int th
 	
 	}
 
-	//fprintf(stderr,"smax=%s,imax=%d\n",smax,imax);
 	for(int j=0;j<thread_num;++j){
 		if(j!=imax){
 			int nexti=bsearch((const char**)(output_lines[j].data()+end[j]),output_lines[j].size()-end[j],smax,compar);
@@ -991,7 +1167,35 @@ void end_adjust(const vector<vector<char*>>& output_lines,int i, int step,int th
 	}
 }
 
+void end_adjust(const vector<vector<ads*>>& output_lines,int i, int step,int thread_num,vector<int>& end,int (*compar)(const void *, const void *)){
+        int tend=(i+1)*step;
+        end=vector<int>(thread_num,tend);
+        ads * smax=output_lines[0][tend-1];
+        int  imax=0;
+        for(int j=1;j<thread_num;++j){
+                if(compar(smax,output_lines[j][tend-1])<0){
+                        imax=j;
+                        smax=output_lines[j][tend-1];
+                }
+
+        }
+
+        for(int j=0;j<thread_num;++j){
+                if(j!=imax){
+                        int nexti=bsearch((const ads**)(output_lines[j].data()+end[j]),output_lines[j].size()-end[j],smax,compar);
+                        end[j]+=nexti;
+                }
+        }
+}
+
 int main(int argc, char** argv) {
+	ADS_MAX.str="{";
+	ADS_MAX.len=1;
+	ADS_MAX.next=-1;
+	ADS_MIN.str="`";
+	ADS_MIN.len=1;
+	ADS_MIN.next=-1;
+
 	struct timeval t1, t2;
 	gettimeofday(&t1, 0);
 	if (argc < 3) {
@@ -1034,7 +1238,7 @@ int main(int argc, char** argv) {
 	int i=0;
 	int block=length/thread_num;
 	thread_args args[thread_num];
-	vector<vector<char*>> output_lines;
+	vector<vector<ads*>> output_lines;
 	vector<pthread_t> tids;
 	tids.reserve(thread_num);
 	output_lines.reserve(thread_num);
@@ -1042,7 +1246,7 @@ int main(int argc, char** argv) {
 
 
 	for(int i=0;i<thread_num;++i){
-		vector<char*> tmp;
+		vector<ads*> tmp;
 		output_lines.push_back(tmp);
 	}
 	int beg=0;
@@ -1119,7 +1323,7 @@ int main(int argc, char** argv) {
 			}
 		}
 		else{
-			end_adjust(output_lines,i,step,thread_num,end,cmp5);
+			end_adjust(output_lines,i,step,thread_num,end,cmp6);
 		}
 
 		/*for(int j=0;j<end.size();++j){
