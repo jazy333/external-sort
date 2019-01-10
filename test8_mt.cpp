@@ -644,8 +644,7 @@ unsigned int __kfifo_get(struct kfifo *fifo, char* &buffer)
     return 0;
 }
 
-
-
+char* STR_MAX="{";
 class merge_sort{
 	public:
 		
@@ -719,14 +718,14 @@ class merge_sort{
                                 if(beg[i]<end[i]){
                                         b.push_back(input[i][beg[i]]);
                                 }else
-                                        b.push_back(0);
+                                        b.push_back(STR_MAX);
                                 index.push_back(beg[i]);
 
                         }
 
                         create_loser_tree();
 
-                        while(b[ls[0]]){
+                        while(compar(&b[ls[0]],&STR_MAX)!=0){
                                 int q=ls[0];
                                 //output.push_back(b[q]);
                                 int len=strlen(b[q]);
@@ -738,7 +737,7 @@ class merge_sort{
                                 if(index[q]<end[q])
                                         b[q]=input[q][index[q]];
                                 else
-                                        b[q]=0;
+                                        b[q]="{";
                                 adjust(q);
                         }
                 }
@@ -783,16 +782,20 @@ class merge_sort{
 		vector<int> ls;
 		vector<char*> b;
 		vector<int> index;
-		__compar_d_fn_t cmp;	
-		void adjust(int i){
+		__compar_d_fn_t cmp;
+		 inline void adjust(int i){
 			int t=(i+k)/2;
 			while(t>0){
-				if(ls[t]==k||!b[i]||(i!=k&&b[ls[t]]&&cmp(&b[i],&b[ls[t]],0)>0)){
-					int tmp=i;
+				//if(ls[t]==k||!b[i]||(i!=k&&b[ls[t]]&&cmp(&b[i],&b[ls[t]],0)>0)){
+				if(cmp(&b[i],&b[ls[t]],0)>0){
+					/*int tmp=i;
 					i=ls[t];
-					ls[t]=tmp;
+					ls[t]=tmp;*/
+					i=i^ls[t];
+					ls[t]=i^ls[t];
+					i=i^ls[t];
 				}
-				t/=2;
+				t=t>>1;
 			}
 
 			ls[0]=i;
@@ -802,7 +805,7 @@ class merge_sort{
 	
 
 		void create_loser_tree(){
-			b.push_back("");
+			b.push_back("`");
 			for(int i=0;i<k;++i){
 				ls.push_back(k);
 			}
