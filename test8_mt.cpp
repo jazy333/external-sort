@@ -924,6 +924,9 @@ struct merge_thread_args{
 	vector<int> beg;
 	char* output;
 	int output_len;
+	vector<int>* offsets;
+	int ofd;
+	pthread_barrier_t* barrier;
 };
 
 void* merge_handle(void* arg){
@@ -933,10 +936,19 @@ void* merge_handle(void* arg){
         merge_sort ms;
 	merge_thread_args* ta=(merge_thread_args*)arg;
         ms.sort(*(ta->input),ta->output,ta->output_len,cmp4,ta->beg,ta->end);
+	(*(ta->offsets))[ta->thr]=ta->output_len;
 	gettimeofday(&tv2, 0);
-	fprintf(stderr, "merge thread %d,output size=%d,sort interval=%d\n",ta->thr,ta->sort_lines->size(),
+	fprintf(stderr, "merge thread %d,output line size=%d,offset=%d,sort interval=%d\n",ta->thr,ta->sort_lines->size(),
+			ta->output_len,
                         (tv2.tv_sec - tv1.tv_sec) * 1000
                                       + (tv2.tv_usec - tv1.tv_usec) / 1000);
+	pthread_barrier_wait(ta->barrier);
+	fprintf(stderr,"all reached\n");
+	int offset=0;
+	for(int i=0;i<ta->thr;++i){
+		offset+=(*(ta->offsets))[i];
+	}
+	pwrite(ta->ofd,ta->output,ta->output_len,offset);
         return 0;
 }
 
@@ -968,7 +980,7 @@ void end_adjust(const vector<vector<char*>>& output_lines,int i, int step,int th
 			smax=output_lines[j][tend-1];
 		}
 	
-	char* output;}
+	}
 
 	//fprintf(stderr,"smax=%s,imax=%d\n",smax,imax);
 	for(int j=0;j<thread_num;++j){
@@ -1065,10 +1077,21 @@ int main(int argc, char** argv) {
 
 
 	tids.clear();
+
+	int ofd = open(output.c_str(), O_RDWR | O_CREAT, 00644);
+
+        if (ofd < 0) {
+                fprintf(stderr, "open output error,err=%s\n", strerror(errno));
+                exit(-1);
+        }
+
+	pthread_barrier_t barrier;
+	pthread_barrier_init(&barrier,NULL, thread_num); 
 	merge_thread_args mtas[thread_num];
 	vector<vector<char*>> sort_lines;
 
-	int lines_num=0;	
+	int lines_num=0;
+	vector<int> offsets(thread_num,0);
         for(int i=0;i<thread_num;++i){
                 vector<char*> tmp;
                 sort_lines.push_back(tmp);
@@ -1085,7 +1108,11 @@ int main(int argc, char** argv) {
 		mtas[i].thr=i;
 		mtas[i].input=&output_lines;
 		mtas[i].step=step;
+		mtas[i].offsets=&offsets;
 		start=end;
+		mtas[i].ofd=ofd;
+		mtas[i].barrier=&barrier;
+		
 		if(i==thread_num-1){
 			for(int j=0;j<end.size();++j){
 				end[j]=output_lines[j].size();
@@ -1111,17 +1138,9 @@ int main(int argc, char** argv) {
 	}
 
 
-	int ofd = open(output.c_str(), O_RDWR | O_CREAT, 00644);
-
-	if (ofd < 0) {
-		fprintf(stderr, "open output error,err=%s\n", strerror(errno));
-		exit(-1);
-	}
 
 	struct timeval tv7, tv8;
 	gettimeofday(&tv7, 0);
-	//char* addr1 = (char*) malloc(length);
-	//build_chunk(sort_lines,addr1);
 	gettimeofday(&tv8, 0);
 	
 	fprintf(stderr, "memcpy interval4=%d\n",
@@ -1129,10 +1148,12 @@ int main(int argc, char** argv) {
 					+ (tv8.tv_usec - tv7.tv_usec) / 1000);
 	struct timeval tv9, tv10;
 	gettimeofday(&tv9, 0);
+#if 0
 	//write(ofd, addr1, length);
 	for(int i=0;i<thread_num;++i){
 		write(ofd, mtas[i].output, mtas[i].output_len);
 	}
+#endif
 	gettimeofday(&tv10, 0);
 	fprintf(stderr, "output interval=%d\n",
 			(tv10.tv_sec - tv9.tv_sec) * 1000
