@@ -868,7 +868,7 @@ void* sort_handle(void* arg){
         thread_args* ta=(thread_args*)arg;
 	int ret=-1;
 	if(ta->thr!=0)
-		 ret=pread(ta->fd, ta->data-129, ta->len+129,ta->offset-129);
+		ret=pread(ta->fd, ta->data-129, ta->len+129,ta->offset-129);
 	else
 		ret=pread(ta->fd, ta->data, ta->len,ta->offset);
 	fprintf(stderr,"ret=%d,errstr=%s,ta->len=%d,offset=%d\n",ret,strerror(errno),ta->len,ta->offset);
@@ -888,10 +888,10 @@ void* sort_handle(void* arg){
                 ta->output->push_back(pre);
                 pre = start + 1;
                 start++;
-		ta->real_len+=len;
+		//ta->real_len+=len;
         }
 	gettimeofday(&tv2, 0);
-	fprintf(stderr, "thread %d,prepaire interval3=%d\n",ta->thr,
+	fprintf(stderr, "thread %d,prepare interval3=%d\n",ta->thr,
                         (tv2.tv_sec - tv1.tv_sec) * 1000
                                       + (tv2.tv_usec - tv1.tv_usec) / 1000);
         char** data = ta->output->data();
