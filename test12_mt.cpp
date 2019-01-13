@@ -1063,7 +1063,7 @@ void heap_sort(char* arr[], int len,int (*compar)(const void *, const void *),vo
 
 /** Number of buckets to use. */
 int numBuckets(int numElements) {
-  return 26*26*26*26;
+  return 26*26*26*26*26;
 }
 
 /**
@@ -1075,20 +1075,26 @@ inline int mario_hash(void *elt) {
  char* str=((ads*)elt)->str;
  switch(((ads*)elt)->len){
 	case 1:
-		return (str[0] - 'a')*676*26;
+		return  (str[0] - 'a')*676*26*26;
 	case 2:
-		return	(str[0] - 'a')*676*26 +
-         		(str[1] - 'a')*676;
+		return	(str[0] - 'a')*676*26*26 +
+         		(str[1] - 'a')*676*26;
 	case 3:
-		return (str[0] - 'a')*676*26 +
-         	(str[1] - 'a')*676 +
-         	(str[2] - 'a')*26;
-	default:
- 		 return (str[0] - 'a')*676*26+ 
-		(str[1] - 'a')*676 +
-         	(str[2] - 'a')*26 +
-         	(str[3] - 'a');
- }
+		return  (str[0] - 'a')*676*26*26 +
+         		(str[1] - 'a')*676*26 +
+         		(str[2] - 'a')*26*26;
+	case 4:
+		return  (str[0] - 'a')*676*26*26 +
+                	(str[1] - 'a')*676*26 +
+                	(str[2] - 'a')*26*26+
+			(str[3]-'a')*26;
+	default :
+ 		 return (str[0] - 'a')*676*26*26+ 
+			(str[1] - 'a')*676*26 +
+         		(str[2] - 'a')*26*26 +
+         		(str[3] - 'a')*26+
+			(str[4] - 'a');
+	}
 }
 
 /* maintain count of entries in each bucket and pointer to its first entry */
@@ -1147,12 +1153,12 @@ void bucket_sort (void **ar, int n,
   int num = numBuckets(n);
   BUCKET * buckets = (BUCKET *) calloc (num, sizeof (BUCKET));
   for (i = 0; i < n; i++) {
+    ads* e=(ads*)ar[i];
     int k = mario_hash(ar[i]);
 
     /** Insert each element and increment counts */
     //ENTRY *e = (ENTRY *) calloc (1, sizeof (ENTRY));
     //e->element = ar[i];
-    ads* e=(ads*)ar[i];
     if (buckets[k].head == NULL) {
       buckets[k].head = e;
     } else {
@@ -1488,7 +1494,7 @@ int main(int argc, char** argv) {
 		}*/
 		mtas[i].beg=start;
 		mtas[i].end=end;
-		mtas[i].output=(char*)malloc(1024*1024*1024);
+		mtas[i].output=(char*)malloc(200*1024*1024);
 		mtas[i].output_len=0;
 		pthread_create(&tid,0,merge_handle,&mtas[i]);
 		tids.push_back(tid);
