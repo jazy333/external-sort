@@ -65,6 +65,9 @@ class wait_list{
 
 	}
 	
+	int size(){
+		return q.size();
+	}	
 	private:
 		pthread_mutex_t _mutex;
 		pthread_cond_t _cond;
@@ -833,6 +836,22 @@ unsigned int __kfifo_get(struct kfifo *fifo, char* &buffer)
     return 0;
 }
 
+struct merge_thread_args{
+        int thr;
+        vector<char*>* sort_lines;
+        vector<vector<char*>>* input;
+        int step;
+        vector<int> end;
+        vector<int> beg;
+        char* output;
+        int output_len;
+        vector<int>* offsets;
+        int ofd;
+        pthread_barrier_t* barrier;
+        wait_list* wl;
+};
+
+vector<wait_list> free_list(6);
 
 char* STR_MAX="{";
 ads ADS_MAX={"{",1,-1};
@@ -870,7 +889,7 @@ class merge_sort{
 		}
 
 
-		void sort(vector<vector<char*>>& input,vector<char*>&output,int (*compar)(const void *, const void *),const vector<int>& beg,const vector<int>& end){
+	void sort(vector<vector<char*>>& input,vector<char*>&output,int (*compar)(const void *, const void *),const vector<int>& beg,const vector<int>& end){
                         cmp=(__compar_d_fn_t)compar;
                         k=input.size();
                         ls.reserve(k);
@@ -932,6 +951,81 @@ class merge_sort{
                         }
                 }
 	
+		 void sort(vector<vector<char*>>& input,int ofd, int& offset,int (*compar)(const void *, const void *),const vector<int>& beg,const vector<int>& end, merge_thread_args* ta){
+                        cmp=(__compar_d_fn_t)compar;
+                        k=input.size();
+                        ls.reserve(k);
+                        b.reserve(k+1);
+                        index.reserve(k);
+			struct timeval t1,t2;
+			gettimeofday(&t1,0);
+			for(int i=0;i<k;++i){
+				for(int j=beg[i];j<end[i];++j){
+					offset+=strlen(input[i][j])+1;
+				}
+			}
+			gettimeofday(&t2,0);
+
+			int interval=(t2.tv_sec-t1.tv_sec)*1000+(t2.tv_usec-t1.tv_usec)/1000;
+			(*(ta->offsets))[ta->thr]=offset;
+			fprintf(stderr,"thr=%d,offset=%d,offset time=%d\n",ta->thr,offset,interval);
+			pthread_barrier_wait(ta->barrier);
+                        for(int i=0;i<k;++i){
+                                if(beg[i]<end[i]){
+                                        b.push_back(input[i][beg[i]]);
+                                }else
+                                        b.push_back(STR_MAX);
+                                index.push_back(beg[i]);
+                        }
+			
+                        create_loser_tree();
+			const int send_block=2*1024;
+			char* tmp=(char*)malloc(send_block);
+			int tmp_len=0;
+			ads* a=(ads*)malloc(sizeof(ads));
+			a->str=tmp;
+                        while(compar(&b[ls[0]],&STR_MAX)!=0){
+				
+                                int q=ls[0];
+				#if 1
+                                int len=strlen(b[q]);
+                                b[q][len]='\n';
+                                //mycpy1(output+offset,b[q],len+1);
+                                //pwrite(ofd,b[q],len,offset);
+                               // offset+=len+1;
+				if(len+1+tmp_len>send_block){
+					a->len=tmp_len;
+					a->next=ta->thr;
+					ta->wl->put(a);
+					tmp_len=0;
+                                        if(free_list[ta->thr].size()==0){
+                                                a=(ads*)malloc(sizeof(ads));
+						tmp=(char*)malloc(send_block);
+                                                a->str=tmp;
+                                        }else{
+                                                a=(ads*)(free_list[ta->thr].get());
+						tmp=a->str;
+                                        }
+				}
+				mycpy1(tmp+tmp_len,b[q],len+1);
+				tmp_len+=(len+1);
+				#endif
+                                index[q]++;
+                                if(index[q]<end[q])
+                                        b[q]=input[q][index[q]];
+                                else
+                                        b[q]="{";
+                                adjust(q);
+                        }
+			if(tmp_len>0){
+				ads* a=(ads*)malloc(sizeof(ads));
+                                a->str=tmp;
+                                a->len=tmp_len;
+                                a->next=ta->thr;
+				ta->wl->put(a);
+			}
+			//ta->wl->put(0);
+                }
 
 		  void sort(vector<vector<ads*>>& input,char* output, int& offset,int (*compar)(const void *, const void *),const vector<int>& beg,const vector<int>& end){
                         cmp=(__compar_d_fn_t)compar;
@@ -1098,16 +1192,15 @@ void heap_sort(char* arr[], int len,int (*compar)(const void *, const void *),vo
 
 struct thread_args{
 	char* data;
-	vector<vector<ads*>>* output;
+	vector<vector<char*>>* output;
 	int thr;
 	int len;
 	int fd;
 	int offset;
-	bucket bucket_queue[RADIX];
-	wait_list* wl;
 	pthread_mutex_t* mutex;
+	wait_list* wl;
+	int tn;
 };
-
 
 void* sort_handle1(void* arg){
         fprintf(stderr,"in sort thread\n");
@@ -1115,12 +1208,13 @@ void* sort_handle1(void* arg){
 
 	struct timeval tv5, tv6;
 	gettimeofday(&tv5, 0);
-	char* addr=0;
-	char* adss=(char*)malloc(20000000*sizeof(ads));
-	while((addr=(char*)(ta->wl->get()))!=0){
+	ads* a=0;
+	//char* adss=(char*)malloc(20000000*sizeof(ads));
+	while((a=(ads*)(ta->wl->get()))!=0){
 		struct timeval tv1, tv2;
         	gettimeofday(&tv1, 0);
-        	char* end=addr+ta->offset;
+        	char* end=a->str+a->len;
+		char* addr=a->str;
         	//if(ta->thr!=0){
                 while(*(addr-1)!='\n'&&*(addr-1)!=0)addr--;
         	//}
@@ -1128,30 +1222,30 @@ void* sort_handle1(void* arg){
         	start = addr;
         	pre = addr;
 		int i=0;
-		vector<ads*> o;
+		vector<char*> o;
         	while ((start = strchr(start, '\n')) != 0&&start<end) {
 
-			ads* a=(ads*)adss;
+			//ads* a=(ads*)adss;
                 	int len = start - pre ;
-			a->len=len;
-			a->str=pre;
+                	pre[len] = 0;
+			//a->len=len;
+			//a->str=pre;
 			++i;
-                	o.push_back(a);
+                	o.push_back(pre);
                 	pre = start + 1;
                 	start++;
-			adss+=sizeof(ads);
+			//adss+=sizeof(ads);
         	}
 
 		gettimeofday(&tv2, 0);
-		//fprintf(stderr, "sort thread %d,prepare interval3=%d,lines num=%d\n",ta->thr,
-                  //      (tv2.tv_sec - tv1.tv_sec) * 1000
-                    //                  + (tv2.tv_usec - tv1.tv_usec) / 1000,o.size());
-        	ads** data = o.data();
+		//fprintf(stderr, "sort thread %d,lines num=%d\n",ta->thr,o.size());
+        	char** data = o.data();
 
-		qsort(data, o.size(), sizeof(ads*), cmp7);
+		qsort(data, o.size(), sizeof(char**), cmp4);
 		pthread_mutex_lock(ta->mutex);
 		ta->output->push_back(o);
 		pthread_mutex_unlock(ta->mutex);
+		free(a);
 	}
 	gettimeofday(&tv6, 0);
         fprintf(stderr, "sort thread %d,lines num=%d,len=%d,sort interval3=%d\n",ta->thr,ta->output->size(),ta->len,
@@ -1161,19 +1255,6 @@ void* sort_handle1(void* arg){
 }
 
 
-struct merge_thread_args{
-	int thr;
-	vector<char*>* sort_lines;
-	vector<vector<ads*>>* input;
-	int step;
-	vector<int> end;
-	vector<int> beg;
-	char* output;
-	int output_len;
-	vector<int>* offsets;
-	int ofd;
-	pthread_barrier_t* barrier;
-};
 
 void* merge_handle(void* arg){
 	fprintf(stderr,"in merge thread\n");
@@ -1181,21 +1262,21 @@ void* merge_handle(void* arg){
 	gettimeofday(&tv1, 0);
         merge_sort ms;
 	merge_thread_args* ta=(merge_thread_args*)arg;
-        ms.sort(*(ta->input),ta->output,ta->output_len,cmp6,ta->beg,ta->end);
+        ms.sort(*(ta->input),ta->ofd,ta->output_len,cmp4,ta->beg,ta->end, ta);
 	(*(ta->offsets))[ta->thr]=ta->output_len;
 	gettimeofday(&tv2, 0);
 	fprintf(stderr, "merge thread %d,output line size=%d,offset=%d,sort interval=%d\n",ta->thr,ta->sort_lines->size(),
 			ta->output_len,
                         (tv2.tv_sec - tv1.tv_sec) * 1000
                                       + (tv2.tv_usec - tv1.tv_usec) / 1000);
-	pthread_barrier_wait(ta->barrier);
+	//pthread_barrier_wait(ta->barrier);
 	fprintf(stderr,"all reached\n");
 	int offset=0;
 	for(int i=0;i<ta->thr;++i){
 		offset+=(*(ta->offsets))[i];
 	}
 	//fprintf(stderr,"merge thread=%d,ouput=%s\n",ta->thr,ta->output);
-	pwrite(ta->ofd,ta->output,ta->output_len,offset);
+	//pwrite(ta->ofd,ta->output,ta->output_len,offset);
         return 0;
 }
 
@@ -1206,9 +1287,12 @@ struct io_thread_args{
 	char* data;
 	int size;
 	int offset;
-	int tn;	
+	int tn;
+	vector<int>* offsets;
+	wait_list* iowl;
+	int ofd;
+	pthread_barrier_t* barrier;	
 };
-
 
 
 void* io_handle(void* args){
@@ -1217,16 +1301,58 @@ void* io_handle(void* args){
 	int sum=0;
 	int nst=0;
 	while(sum<ta->size){
-		int ret=read(ta->fd, ta->data,ta->offset);
+		
+		int ret=0;
+		ads* a=(ads*)malloc(sizeof(ads));
+                a->str=ta->data;
+		if(ta->size-sum<2*ta->offset){
+			ret=read(ta->fd,ta->data,ta->size-sum);
+			}
+		else{
+			ret=read(ta->fd, ta->data,ta->offset);
+		}
+		a->len=ret;
 		sum+=ret;
-		((*(ta->wl))[nst%ta->tn]).put(ta->data);
+		((*(ta->wl))[nst%ta->tn]).put(a);
 		ta->data+=ret;
 		++nst;
 	}
 	for(int i=0;i<ta->tn;++i){
 		((*(ta->wl))[i]).put(0);
 	}
-	fprintf(stderr,"io handle end\n");
+
+	pthread_barrier_wait(ta->barrier);
+	vector<int> offsets;
+	for(int i=0;i<ta->tn;++i){
+		int sum=0;
+		for(int j=0;j<i;++j)
+			sum+=(*(ta->offsets))[j];
+		offsets.push_back(sum);	
+	}	
+	ads* a=0;
+	int nexit=0;
+	int i=0;
+	while((a=(ads*)(ta->iowl->get()))!=0){
+		#if 0
+		if(!a){
+			++nexit;
+			fprintf(stderr,"get a null,wait list size=%d\n",ta->iowl->size());
+			if(nexit==ta->tn)
+				break;
+			else 
+				continue;
+		}
+		#endif 
+		//fprintf(stderr,"thr=%d,str=%s,len=%d\n",a->next,a->str,a->len);
+		pwrite(ta->ofd,a->str,a->len,offsets[a->next]);
+		offsets[a->next]+=(a->len);
+		//fprintf(stderr,"offset[%d]=%d\n",a->next,offsets[a->next]);
+		//free(a->str);
+		//free(a);
+		free_list[a->next].put(a);	
+		++i;
+	}
+	fprintf(stderr,"io handle end,write line=%d\n",i);
 	return 0;
 }
 
@@ -1266,18 +1392,21 @@ int bsearch(const ads** ptr,int size,ads* target,int (*compar)(const void *, con
 }
 
 void end_adjust(const vector<vector<char*>>& output_lines,int i, int step,int thread_num,vector<int>& end,int (*compar)(const void *, const void *)){
-	int tend=(i+1)*step;
-	end=vector<int>(thread_num,tend);
-	char * smax=output_lines[0][tend-1];
-	int  imax=0;
-	for(int j=1;j<thread_num;++j){
-		if(compar(smax,output_lines[j][tend-1])<0){
-			imax=j;
-			smax=output_lines[j][tend-1];
-		}
-	
-	}
+	for(int j=0;j<thread_num;++j){
+		int tend=(i+1)*(output_lines[j].size()/step);
+                end[j]=min(max(tend,end[j]+1),(int)output_lines[j].size());
+        }
 
+	char * smax=0;
+        int  imax=-1;
+        for(int j=0;j<thread_num;++j){
+                if(end[j]>0&&end[j]<=output_lines[j].size()&&(!smax||compar(smax,output_lines[j][end[j]-1])<0)){
+                        imax=j;
+                        smax=output_lines[j][end[j]-1];
+                }
+
+        }
+	
 	for(int j=0;j<thread_num;++j){
 		if(j!=imax){
 			int nexti=bsearch((const char**)(output_lines[j].data()+end[j]),output_lines[j].size()-end[j],smax,compar);
@@ -1288,16 +1417,13 @@ void end_adjust(const vector<vector<char*>>& output_lines,int i, int step,int th
 
 void end_adjust(const vector<vector<ads*>>& output_lines,int i, int step,int thread_num,vector<int>& end,int (*compar)(const void *, const void *)){
         int tend=((i+1)*step);
-        //end=vector<int>(thread_num,tend);
         for(int j=0;j<thread_num;++j){
-		//end[j]=tend>=output_lines[j].size()?output_lines[j].size():tend;
 		end[j]=min(max(tend,end[j]+1),(int)output_lines[j].size());
 	}
         ads * smax=0;
         int  imax=-1;
         for(int j=0;j<thread_num;++j){
                 if(end[j]>0&&end[j]<=output_lines[j].size()&&(!smax||compar(smax,output_lines[j][end[j]-1])<0)){
-                        //fprintf(stderr,"j=%d,end[%d]=%d\n",j,j,end[j]);
 			imax=j;
                         smax=output_lines[j][end[j]-1];
                 }
@@ -1312,6 +1438,72 @@ void end_adjust(const vector<vector<ads*>>& output_lines,int i, int step,int thr
                 }
         }
 }
+
+
+void end_adjust(const vector<vector<char*>>& output_lines,int i, int mean_lines,int thread_num,vector<int>& beg,vector<int>& end,int (*compar)(const void *, const void *)){
+	
+	int now_lines=0;
+	vector<char*> check_point;
+	int lines_num=output_lines.size();
+	for(int j=0;j<lines_num;++j){
+                        int size=output_lines[j].size();
+                        int tend=(i+1)*(size/thread_num);
+                        tend=min(max(tend,end[j]+1),size);
+			end[j]=tend;
+			//fprintf(stderr,"tend=%d\n",tend);
+                        if(tend<size)
+                                check_point.push_back(output_lines[j][tend]);
+	}
+
+
+	vector<int> pos=end;
+	int sub_lines=99999999;
+//	while(true){
+		qsort(check_point.data(), check_point.size(), sizeof(char**), cmp4);
+		int  mid=0;
+		int  start=0;
+		int  last=(int)(check_point.size());
+		while(start<last){
+			mid=(start+last)/2;	
+			char* smid=check_point[mid];
+			now_lines=0;
+			for(int j=0;j<lines_num;++j){
+                        	int nexti=bsearch((const char**)(output_lines[j].data()),output_lines[j].size(),smid,compar);
+                        	pos[j]=nexti;
+				now_lines+=end[j]-beg[j];	
+        		}
+
+		
+			if(abs(now_lines-mean_lines)<sub_lines){
+				end=pos;
+				sub_lines=abs(now_lines-mean_lines);
+			}
+			else if(now_lines-mean_lines>0){
+				last=mid-1;
+			}else
+				start=mid+1;
+		//fprintf(stderr,"start=%d,mid=%d,last=%d,now_lines=%d,mean_lines=%d\n",start,mid,last,now_lines,mean_lines);
+		}
+
+		#if 0
+		check_point.clear();
+		if(abs(now_lines-mean_lines)<100000){
+			break;
+		}else if(now_lines-mean_lines>100000){
+			for(int j=0;j<lines_num;++j){
+				int size=output_lines[j].size();
+				if(end[j]-beg[j]>2){
+					int tend=min(max(tend,end[j]-1),size);
+					
+				}
+				
+			}
+		}
+		#endif
+//	}
+	
+}
+
 
 int main(int argc, char** argv) {
 
@@ -1340,11 +1532,21 @@ int main(int argc, char** argv) {
 		exit(-1);
 	}
 
-	size_t length = sb.st_size;
+	int ofd = open(output.c_str(), O_RDWR | O_CREAT, 00644);
 
-	int read_block=16*1024*1024;
+        if (ofd < 0) {
+                fprintf(stderr, "open output error,err=%s\n", strerror(errno));
+                exit(-1);
+        }
+
 	const int thread_num=6;
-	vector<wait_list> wl(thread_num); 
+	vector<int> offsets(thread_num,0);
+	size_t length = sb.st_size;
+	pthread_barrier_t barrier;
+        pthread_barrier_init(&barrier,NULL, thread_num+1);
+	int read_block=length/384;
+	vector<wait_list> wl(thread_num);
+	wait_list iowl; 
 	char* addr = (char*) malloc(length+1);
 	*addr=0;
 	io_thread_args ita;
@@ -1355,14 +1557,18 @@ int main(int argc, char** argv) {
 	ita.fd=ifd;
 	ita.tn=thread_num;
 	ita.size=length;
-	pthread_t tid;
-	pthread_create(&tid,0,io_handle,&ita);
+	ita.ofd=ofd;
+	ita.offsets=&offsets;
+	ita.iowl=&iowl;
+	ita.barrier=&barrier;
+	pthread_t io_tid;
+	pthread_create(&io_tid,0,io_handle,&ita);
 	
 	
 	int i=0;
 	int block=length/thread_num;
 	thread_args args[thread_num];
-	vector<vector<ads*>> output_lines;
+	vector<vector<char*>> output_lines;
 	vector<pthread_t> tids;
 	tids.reserve(thread_num);
 	output_lines.reserve(thread_num);
@@ -1388,6 +1594,7 @@ int main(int argc, char** argv) {
 		args[i].offset=read_block;
 		args[i].mutex=&mutex;
 		args[i].wl=&wl[i];
+		args[i].tn=thread_num;
 		beg+=block;
 		pthread_create(&tid,0,sort_handle1,&args[i]);
 		tids.push_back(tid);
@@ -1398,21 +1605,18 @@ int main(int argc, char** argv) {
                 pthread_join(tids[i],0);
         }
 	tids.clear();
-
-	int ofd = open(output.c_str(), O_RDWR | O_CREAT, 00644);
-
-        if (ofd < 0) {
-                fprintf(stderr, "open output error,err=%s\n", strerror(errno));
-                exit(-1);
-        }
-
-	pthread_barrier_t barrier;
-	pthread_barrier_init(&barrier,NULL, thread_num); 
+#if 0
+	for(int i=0;i<output_lines.size();++i){
+		for(int j=0;j<output_lines[i].size();++j){
+			fprintf(stderr,"output[%d],line=%s\n",i,output_lines[i][j]);
+		}
+	}
+#endif
 	merge_thread_args mtas[thread_num];
 	vector<vector<char*>> sort_lines(thread_num);
 
 	int lines_num=0;
-	vector<int> offsets(thread_num,0);
+	//vector<int> offsets(thread_num,0);
 	fprintf(stderr,"output lines block=%d\n",output_lines.size());
         for(int i=0;i<output_lines.size();++i){
 		lines_num+=output_lines[i].size();
@@ -1433,6 +1637,7 @@ int main(int argc, char** argv) {
 		start=end;
 		mtas[i].ofd=ofd;
 		mtas[i].barrier=&barrier;
+		mtas[i].wl=&iowl;
 		
 		if(i==thread_num-1){
 			for(int j=0;j<end.size();++j){
@@ -1440,7 +1645,7 @@ int main(int argc, char** argv) {
 			}
 		}
 		else{
-			end_adjust(output_lines,i,step,output_lines.size(),end,cmp6);
+			end_adjust(output_lines,i,lines_num/thread_num,thread_num,start,end,cmp5);
 		}
 
 		mtas[i].beg=start;
@@ -1455,7 +1660,8 @@ int main(int argc, char** argv) {
 		pthread_join(tids[i],0);
 	}
 
-
+	iowl.put(0);
+	pthread_join(io_tid,0);
 
 	struct timeval tv7, tv8;
 	gettimeofday(&tv7, 0);
